@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liga Dwójek – System ELO 2v2 (v6)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { background-color: #0b0f19; color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+        .card { background-color: #151c2c; border: 1px solid #26334d; }
+        .slide-gradient { background: radial-gradient(circle at top right, #1e293b, #0f172a 70%); }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+    <div class="max-w-7xl mx-auto space-y-6">
+        <!-- Header -->
+        <header class="card rounded-xl p-5 flex flex-wrap justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                    <i data-lucide="trophy" class="w-7 h-7 text-amber-400"></i>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold tracking-tight text-white">LIGA DWÓJEK <span class="text-xs font-semibold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 ml-2">v6 SAFE JSON PARSER</span></h1>
+                    <p class="text-xs text-slate-400">Wklej zrzut ekranu (Ctrl+V). Prezentacja ciekawostek z lektorem TTS, zerowaniem sesji i linkiem synchronizującym dla znajomych.</p>
+                </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <button onclick="shareUrlWithFriends()" class="px-3 py-2 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 text-xs font-bold flex items-center gap-1.5 border border-emerald-500/40">
+                    <i data-lucide="share-2" class="w-4 h-4"></i> Kopiuj Link ze Stanem dla Znajomych
+                </button>
+                <button onclick="openSettings()" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium flex items-center gap-1.5 border border-slate-700">
+                    <i data-lucide="key" class="w-4 h-4 text-amber-400"></i> Klucz API (<span id="currentModelBadge" class="text-amber-300">auto</span>)
+                </button>
+                <button onclick="exportData()" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium flex items-center gap-1.5 border border-slate-700">
+                    <i data-lucide="download" class="w-4 h-4 text-sky-400"></i> Eksport JSON
+                </button>
+                <button onclick="undoLastMatch()" class="px-3 py-2 rounded-lg bg-rose-950/60 hover:bg-rose-900/70 text-rose-300 text-xs font-medium flex items-center gap-1.5 border border-rose-800/60">
+                    <i data-lucide="rotate-ccw" class="w-4 h-4"></i> Cofnij mecz
+                </button>
+            </div>
+        </header>
+
+        <datalist id="playersList"></datalist>
+
+        <!-- Main Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- Left Column -->
+            <div class="lg:col-span-7 space-y-6">
+                <!-- Dropzone -->
+                <div id="dropzone" class="card rounded-xl p-6 border-2 border-dashed border-slate-700 hover:border-amber-500/60 transition-all text-center cursor-pointer relative" onclick="document.getElementById('fileInput').click()">
+                    <input type="file" id="fileInput" accept="image/*" class="hidden" onchange="handleFileSelect(event)">
+                    <div id="dropzoneContent" class="space-y-2 py-4">
+                        <div class="mx-auto w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center">
+                            <i data-lucide="image-plus" class="w-6 h-6 text-amber-400"></i>
+                        </div>
+                        <h3 class="text-base font-semibold text-white">Wklej zrzut ekranu z gry (<kbd class="px-1.5 py-0.5 bg-slate-800 rounded text-amber-400">Ctrl + V</kbd>) lub kliknij tutaj</h3>
+                        <p class="text-xs text-slate-400">Mapuje główne nicki i automatycznie dodaje nowych graczy (start: 1000 ELO)</p>
+                    </div>
+                    <div id="loadingOverlay" class="hidden py-6 space-y-3">
+                        <div class="animate-spin mx-auto w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full"></div>
+                        <p id="loadingStatusText" class="text-sm text-amber-300 font-medium">Analizowanie tabeli wyników przez Gemini Vision...</p>
+                    </div>
+                </div>
+
+                <!-- Verification Panel -->
+                <div id="verifyPanel" class="card rounded-xl p-5 hidden space-y-4 border-amber-500/50">
+                    <div class="flex flex-wrap justify-between items-center border-b border-slate-800 pb-3 gap-2">
+                        <div>
+                            <h3 class="font-bold text-amber-400 flex items-center gap-2">
+                                <i data-lucide="check-circle-2" class="w-5 h-5"></i> Weryfikacja odczytu przed zapisem
+                            </h3>
+                            <p id="newPlayerNotice" class="text-xs text-sky-400 mt-0.5 hidden"></p>
+                        </div>
+                        <button onclick="swapTeams()" class="text-xs px-2.5 py-1 bg-slate-800 hover:bg-slate-700 rounded border border-slate-600 flex items-center gap-1">
+                            <i data-lucide="arrow-left-right" class="w-3.5 h-3.5"></i> Zamień Wygranych / Przegranych
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Winners -->
+                        <div class="bg-emerald-950/20 border border-emerald-800/40 rounded-lg p-3 space-y-2">
+                            <div class="text-xs font-bold text-emerald-400 uppercase tracking-wider">Wygrani (Drużyna zwycięska)</div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input id="w1_name" list="playersList" type="text" placeholder="Nick 1" oninput="checkNewPlayersNotice()" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm">
+                                <input id="w1_champ" type="text" placeholder="Champion" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm">
+                                <input id="w1_dmg" type="number" placeholder="DMG" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm col-span-2">
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 pt-2 border-t border-emerald-900/30">
+                                <input id="w2_name" list="playersList" type="text" placeholder="Nick 2" oninput="checkNewPlayersNotice()" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm">
+                                <input id="w2_champ" type="text" placeholder="Champion" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm">
+                                <input id="w2_dmg" type="number" placeholder="DMG" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm col-span-2">
+                            </div>
+                        </div>
+
+                        <!-- Losers -->
+                        <div class="bg-rose-950/20 border border-rose-800/40 rounded-lg p-3 space-y-2">
+                            <div class="text-xs font-bold text-rose-400 uppercase tracking-wider">Przegrani (Drużyna pokonana)</div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <input id="l1_name" list="playersList" type="text" placeholder="Nick 3" oninput="checkNewPlayersNotice()" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm">
+                                <input id="l1_champ" type="text" placeholder="Champion" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm">
+                                <input id="l1_dmg" type="number" placeholder="DMG" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm col-span-2">
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 pt-2 border-t border-rose-900/30">
+                                <input id="l2_name" list="playersList" type="text" placeholder="Nick 4" oninput="checkNewPlayersNotice()" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm">
+                                <input id="l2_champ" type="text" placeholder="Champion" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm">
+                                <input id="l2_dmg" type="number" placeholder="DMG" class="bg-slate-900 border border-slate-700 rounded p-1.5 text-sm col-span-2">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                            <label class="text-xs text-slate-400">Czas gry (MM:SS)</label>
+                            <input id="match_duration" type="text" placeholder="18:20" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm mt-1">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="text-xs text-slate-400">Ciekawostka statystyczna</label>
+                            <input id="match_trivia" type="text" class="w-full bg-slate-900 border border-slate-700 rounded p-2 text-sm mt-1">
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end gap-2 pt-2">
+                        <button onclick="closeVerifyPanel()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium">Anuluj</button>
+                        <button onclick="confirmMatch()" class="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5">
+                            <i data-lucide="save" class="w-4 h-4"></i> Zatwierdź mecz i przelicz ELO
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Standings Table -->
+                <div class="card rounded-xl p-5 space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                            <i data-lucide="bar-chart-3" class="w-5 h-5 text-amber-400"></i> Aktualny Stan Tabeli
+                        </h2>
+                        <button onclick="openManualMatch()" class="text-xs px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300">
+                            + Dodaj mecz ręcznie
+                        </button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="border-b border-slate-800 text-xs uppercase text-slate-400">
+                                    <th class="py-3 px-3">#</th>
+                                    <th class="py-3 px-3">Gracz</th>
+                                    <th class="py-3 px-3 text-center">ELO</th>
+                                    <th class="py-3 px-3 text-center">W</th>
+                                    <th class="py-3 px-3 text-center">L</th>
+                                    <th class="py-3 px-3 text-center">WR %</th>
+                                    <th class="py-3 px-3 text-center">Seria</th>
+                                    <th class="py-3 px-3 text-center">Forma (ost. 5)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="standingsBody" class="divide-y divide-slate-800/60 text-sm"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- League Records -->
+                <div class="card rounded-xl p-5 space-y-3">
+                    <h2 class="text-lg font-bold text-white flex items-center gap-2">
+                        <i data-lucide="award" class="w-5 h-5 text-amber-400"></i> Rekordy Ligi
+                    </h2>
+                    <div id="recordsGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-sm"></div>
+                </div>
+            </div>
+
+            <!-- Right Column: Presentation + TTS + Protocol -->
+            <div class="lg:col-span-5 space-y-6">
+                <!-- Interactive Presentation + TTS -->
+                <div class="card rounded-xl p-5 space-y-4 border-purple-500/40">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <div>
+                            <h2 class="text-base font-bold text-white flex items-center gap-2">
+                                <i data-lucide="presentation" class="w-5 h-5 text-purple-400"></i> Koniec Sesji – Prezentacja & Lektor TTS
+                            </h2>
+                            <p class="text-xs text-slate-400">Generuje 10 slajdów TYLKO z bieżącej sesji (<span id="sessionCountLabel" class="text-amber-400 font-bold">0</span> meczów) i zeruje licznik</p>
+                        </div>
+                        <button onclick="endSessionAndGenerateSlides()" class="px-3.5 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-purple-900/30">
+                            <i data-lucide="sparkles" class="w-4 h-4"></i> Zakończ Sesję (Slajdy + Reset)
+                        </button>
+                    </div>
+
+                    <!-- Slide Deck Viewer -->
+                    <div id="slideViewer" class="slide-gradient border border-slate-700/80 rounded-xl p-6 min-h-[230px] flex flex-col justify-between relative overflow-hidden">
+                        <div class="flex justify-between items-center text-xs text-slate-400">
+                            <span id="slideBadge" class="px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-semibold border border-purple-500/30">Slajd 0 / 0</span>
+                            <span id="ttsStatus" class="text-amber-400 font-medium hidden">🔊 Lektor czyta...</span>
+                        </div>
+
+                        <div class="my-4 space-y-2">
+                            <h3 id="slideTitle" class="text-lg font-extrabold text-amber-400 tracking-tight">Gotowy na podsumowanie wieczoru?</h3>
+                            <p id="slideText" class="text-sm text-slate-200 leading-relaxed">
+                                Po rozegraniu meczów kliknij „Zakończ Sesję”. System wygeneruje 10 slajdów ciekawostek wyłącznie z dzisiejszych starć, przeczyta je głosem lektora (TTS) i wyzeruje licznik sesji na kolejny dzień.
+                            </p>
+                        </div>
+
+                        <!-- Slide & TTS Controls -->
+                        <div class="flex flex-wrap justify-between items-center gap-2 pt-3 border-t border-slate-800/80">
+                            <div class="flex items-center gap-1.5">
+                                <button onclick="prevSlide()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200" title="Poprzedni slajd">
+                                    <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                                </button>
+                                <button onclick="nextSlide()" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200" title="Następny slajd">
+                                    <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                                </button>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <button onclick="speakCurrentSlide()" class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5">
+                                    <i data-lucide="volume-2" class="w-3.5 h-3.5"></i> Czytaj slajd
+                                </button>
+                                <button onclick="autoPlayPresentation()" class="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold flex items-center gap-1.5">
+                                    <i data-lucide="play" class="w-3.5 h-3.5"></i> Auto-Pokaz TTS
+                                </button>
+                                <button onclick="stopTTS()" class="p-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/50 text-xs" title="Zatrzymaj lektora">
+                                    <i data-lucide="square" class="w-3.5 h-3.5"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Exact Protocol Output -->
+                <div class="card rounded-xl p-5 space-y-3">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-base font-bold text-white flex items-center gap-2">
+                            <i data-lucide="terminal" class="w-4 h-4 text-amber-400"></i> Raport Sędziego (Protokół Markdown)
+                        </h2>
+                        <button onclick="copyProtocol()" class="px-3 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5">
+                            <i data-lucide="copy" class="w-3.5 h-3.5"></i> Kopiuj na Discord
+                        </button>
+                    </div>
+                    <pre id="protocolOutput" class="bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs font-mono text-slate-200 whitespace-pre-wrap overflow-x-auto leading-relaxed"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="fixed inset-0 bg-black/75 hidden items-center justify-center p-4 z-50">
+        <div class="card rounded-xl max-w-md w-full p-6 space-y-4">
+            <div class="flex justify-between items-center">
+                <h3 class="text-lg font-bold text-white">Klucz Gemini API i Ustawienia</h3>
+                <button onclick="closeSettings()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <div>
+                <label class="text-xs text-slate-300 font-medium">Gemini API Key</label>
+                <input id="apiKeyInput" type="password" placeholder="AIzaSy..." class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm mt-1">
+            </div>
+            <div>
+                <div class="flex justify-between items-center">
+                    <label class="text-xs text-slate-300 font-medium">Model AI</label>
+                    <button onclick="detectAvailableModels()" class="text-xs text-amber-400 hover:underline">Sprawdź dostępne modele</button>
+                </div>
+                <input id="modelInput" type="text" placeholder="gemini-3.0-flash" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm mt-1">
+                <p id="modelDetectStatus" class="text-xs text-emerald-400 mt-1 hidden"></p>
+            </div>
+            <div class="flex justify-between items-center pt-2">
+                <button onclick="resetToDefaultState()" class="text-xs text-rose-400 hover:underline">Resetuj bazę do stanu z czatu</button>
+                <div class="flex gap-2">
+                    <button onclick="closeSettings()" class="px-4 py-2 rounded-lg bg-slate-800 text-xs">Zamknij</button>
+                    <button onclick="saveSettings()" class="px-4 py-2 rounded-lg bg-amber-500 text-slate-950 font-bold text-xs">Zapisz</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const ALIAS_MAP = {
+            "canc3r07": "Cancer", "cancer": "Cancer",
+            "spicybob": "SPICYBob", "przypro": "Przypro",
+            "jargolek": "Jargolek", "firstu": "Firstu",
+            "dokti1337": "DokTi1337", "leryen": "Leryen"
+        };
+
+        const FALLBACK_MODELS = [
+            "gemini-3.0-flash", "gemini-3-flash-preview",
+            "gemini-2.5-flash", "gemini-2.0-flash"
+        ];
+
+        const INITIAL_STATE = {
+            players: {
+                Cancer:    { name: "Cancer",    elo: 1116, w: 22, l: 14, form: ["W", "W", "W", "L", "L"], streak: 3 },
+                Jargolek:  { name: "Jargolek",  elo: 1075, w: 26, l: 19, form: ["L", "L", "L", "W", "W"], streak: -3 },
+                DokTi1337: { name: "DokTi1337", elo: 1002, w: 2,  l: 2,  form: [], streak: 0 },
+                Firstu:    { name: "Firstu",    elo: 989,  w: 12, l: 14, form: ["W", "W", "W", "L", "L"], streak: 3 },
+                SPICYBob:  { name: "SPICYBob",  elo: 971,  w: 22, l: 23, form: ["L", "L", "L", "L", "W"], streak: -4 },
+                Leryen:    { name: "Leryen",    elo: 968,  w: 1,  l: 3,  form: [], streak: 0 },
+                Przypro:   { name: "Przypro",   elo: 879,  w: 9,  l: 19, form: ["W", "L", "L", "L", "L"], streak: 1 }
+            },
+            records: {
+                maxElo: { value: 1129, player: "Jargolek" },
+                minElo: { value: 862,  player: "Przypro" },
+                maxDmg: { value: 203679, player: "SPICYBob", champion: "Shyvana" },
+                longestGame: { duration: "36:26", desc: "SPICYBob & Cancer vs Jargolek & Firstu" },
+                maxWinStreak: { value: 8, player: "Jargolek" },
+                maxLossStreak: { value: 6, player: "Przypro" },
+                topChampions: [
+                    "1. Ivern (Niezawodność i gigantyczny wpływ na winrate Jargolka)",
+                    "2. Shyvana (Niepobity rekord 203k obrażeń SPICYBoba)",
+                    "3. Xerath / Teemo (Narzędzia dominacji i tortur w rękach Cancera)"
+                ]
+            },
+            lastMatchReport: null,
+            currentSessionMatches: [],
+            slides: [],
+            history: []
+        };
+
+        let appState = loadState();
+        let currentSlideIndex = 0;
+        let autoPlayActive = false;
+
+        function loadState() {
+            // 1. Sprawdź czy w linku URL (#state=...) przekazano stan od znajomego
+            if (window.location.hash.startsWith("#state=")) {
+                try {
+                    const encoded = window.location.hash.replace("#state=", "");
+                    const decoded = JSON.parse(decodeURIComponent(escape(atob(encoded))));
+                    localStorage.setItem("liga_dwojek_state_v5", JSON.stringify(decoded));
+                    history.replaceState(null, "", window.location.pathname);
+                    return decoded;
+                } catch (e) {
+                    console.warn("Błąd odczytu stanu z linku URL:", e);
+                }
+            }
+            const saved = localStorage.getItem("liga_dwojek_state_v5") || localStorage.getItem("liga_dwojek_state_v4");
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    if (!parsed.currentSessionMatches) parsed.currentSessionMatches = [];
+                    if (!parsed.slides) parsed.slides = [];
+                    return parsed;
+                } catch (e) {}
+            }
+            return JSON.parse(JSON.stringify(INITIAL_STATE));
+        }
+
+        function saveState() {
+            localStorage.setItem("liga_dwojek_state_v5", JSON.stringify(appState));
+            renderAll();
+        }
+
+        function shareUrlWithFriends() {
+            const minimalState = {
+                players: appState.players,
+                records: appState.records,
+                lastMatchReport: appState.lastMatchReport,
+                currentSessionMatches: appState.currentSessionMatches,
+                slides: appState.slides,
+                history: []
+            };
+            const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(minimalState))));
+            const shareUrl = `${window.location.origin}${window.location.pathname}#state=${encoded}`;
+            navigator.clipboard.writeText(shareUrl);
+            alert("Skopiowano link z aktualną tabelą i prezentacją! Wyślij go znajomym na Discordzie – po kliknięciu zobaczą dokładnie ten sam stan bez żadnej bazy danych.");
+        }
+
+                function extractSafeJSON(text) {
+            if (!text) throw new Error("Pusta odpowiedź z modelu AI.");
+            // Wyciągnij wyłącznie strukturę {...} lub [...] ignorując cały tekst/gwiazdki dookoła
+            const firstBrace = text.indexOf("{");
+            const firstBracket = text.indexOf("[");
+            let start = -1;
+            let end = -1;
+            if (firstBracket !== -1 && (firstBrace === -1 || firstBracket < firstBrace)) {
+                start = firstBracket;
+                end = text.lastIndexOf("]");
+            } else if (firstBrace !== -1) {
+                start = firstBrace;
+                end = text.lastIndexOf("}");
+            }
+            if (start !== -1 && end !== -1 && end > start) {
+                const clean = text.substring(start, end + 1);
+                return JSON.parse(clean);
+            }
+            return JSON.parse(text.replace(/```json|```|\*\*/g, "").trim());
+        }
+
+        function normalizePlayerName(rawName) {
+            if (!rawName) return "";
+            const trimmed = rawName.trim();
+            const lower = trimmed.toLowerCase();
+            if (ALIAS_MAP[lower]) return ALIAS_MAP[lower];
+            const existingKey = Object.keys(appState.players).find(k => k.toLowerCase() === lower);
+            return existingKey || trimmed;
+        }
+
+        function updateModelBadge() {
+            const m = localStorage.getItem("liga_dwojek_model") || "gemini-3.0-flash";
+            document.getElementById("currentModelBadge").textContent = m;
+        }
+
+        async function resolveWorkingModel(apiKey) {
+            const preferred = (localStorage.getItem("liga_dwojek_model") || "gemini-3.0-flash").replace(/^models\//, "");
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+                const data = await res.json();
+                if (data.models && Array.isArray(data.models)) {
+                    const supported = data.models
+                        .filter(m => (m.supportedGenerationMethods || []).includes("generateContent"))
+                        .map(m => m.name.replace(/^models\//, ""));
+                    if (supported.includes(preferred)) return [preferred, ...supported.filter(x => x !== preferred)];
+                    const prioritized = [
+                        ...FALLBACK_MODELS.filter(m => supported.includes(m)),
+                        ...supported.filter(m => m.includes("flash")),
+                        ...supported.filter(m => m.includes("gemini"))
+                    ];
+                    if (prioritized.length > 0) return [...new Set(prioritized)];
+                }
+            } catch (e) {}
+            return [...new Set([preferred, ...FALLBACK_MODELS])];
+        }
+
+        async function callGeminiWithFallback(apiKey, payload) {
+            const candidates = await resolveWorkingModel(apiKey);
+            let lastError = null;
+            for (const modelName of candidates) {
+                const statusEl = document.getElementById("loadingStatusText");
+                if (statusEl) statusEl.textContent = `Analizowanie przez model ${modelName}...`;
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!data.error) {
+                    localStorage.setItem("liga_dwojek_model", modelName);
+                    updateModelBadge();
+                    return data;
+                }
+                lastError = data.error.message || JSON.stringify(data.error);
+                const match = lastError.match(/models\/([a-zA-Z0-9.\-_]+)/);
+                if (match && match[1] && !candidates.includes(match[1])) candidates.push(match[1]);
+            }
+            throw new Error(lastError || "Błąd połączenia z API Gemini.");
+        }
+
+        function renderSlide() {
+            const slides = appState.slides || [];
+            const badge = document.getElementById("slideBadge");
+            const title = document.getElementById("slideTitle");
+            const text = document.getElementById("slideText");
+
+            if (slides.length === 0) {
+                badge.textContent = "Brak slajdów";
+                title.textContent = "Gotowy na podsumowanie sesji?";
+                text.textContent = "Po rozegraniu meczów kliknij „Zakończ Sesję”. System wygeneruje 10 slajdów ciekawostek wyłącznie z bieżącej sesji, odczyta je lektorem TTS i wyzeruje licznik sesji.";
+                return;
+            }
+
+            if (currentSlideIndex >= slides.length) currentSlideIndex = 0;
+            if (currentSlideIndex < 0) currentSlideIndex = slides.length - 1;
+
+            const s = slides[currentSlideIndex];
+            badge.textContent = `Slajd ${currentSlideIndex + 1} / ${slides.length}`;
+            title.textContent = s.title || `Ciekawostka #${currentSlideIndex + 1}`;
+            text.textContent = s.text || "";
+        }
+
+        function nextSlide() {
+            if (!appState.slides || appState.slides.length === 0) return;
+            currentSlideIndex = (currentSlideIndex + 1) % appState.slides.length;
+            renderSlide();
+            if (autoPlayActive) speakCurrentSlide(true);
+        }
+
+        function prevSlide() {
+            if (!appState.slides || appState.slides.length === 0) return;
+            currentSlideIndex = (currentSlideIndex - 1 + appState.slides.length) % appState.slides.length;
+            renderSlide();
+        }
+
+        function stopTTS() {
+            autoPlayActive = false;
+            if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+            document.getElementById("ttsStatus").classList.add("hidden");
+        }
+
+        function speakCurrentSlide(continueAuto = false) {
+            if (!("speechSynthesis" in window)) {
+                alert("Twoja przeglądarka nie obsługuje syntezatora mowy Web Speech API.");
+                return;
+            }
+            const slides = appState.slides || [];
+            if (slides.length === 0) return;
+
+            window.speechSynthesis.cancel();
+            const s = slides[currentSlideIndex];
+            const utterance = new SpeechSynthesisUtterance(`${s.title}. ${s.text}`);
+            utterance.lang = "pl-PL";
+            utterance.rate = 1.05;
+
+            const voices = window.speechSynthesis.getVoices();
+            const plVoice = voices.find(v => v.lang.startsWith("pl"));
+            if (plVoice) utterance.voice = plVoice;
+
+            document.getElementById("ttsStatus").classList.remove("hidden");
+
+            utterance.onend = () => {
+                document.getElementById("ttsStatus").classList.add("hidden");
+                if (continueAuto && autoPlayActive) {
+                    if (currentSlideIndex < slides.length - 1) {
+                        currentSlideIndex++;
+                        renderSlide();
+                        speakCurrentSlide(true);
+                    } else {
+                        autoPlayActive = false;
+                    }
+                }
+            };
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function autoPlayPresentation() {
+            if (!appState.slides || appState.slides.length === 0) {
+                alert("Najpierw wygeneruj prezentację przyciskiem „Zakończ Sesję”!");
+                return;
+            }
+            autoPlayActive = true;
+            currentSlideIndex = 0;
+            renderSlide();
+            speakCurrentSlide(true);
+        }
+
+        async function endSessionAndGenerateSlides() {
+            const apiKey = localStorage.getItem("liga_dwojek_api_key");
+            if (!apiKey) {
+                openSettings();
+                alert("Wklej najpierw swój klucz Gemini API!");
+                return;
+            }
+
+            const sessionMatches = appState.currentSessionMatches || [];
+            if (sessionMatches.length === 0) {
+                alert("Licznik bieżącej sesji wynosi 0 meczów! Rozegraną sesję właśnie wyzerowano lub nie dodano jeszcze nowych meczów.");
+                return;
+            }
+
+            document.getElementById("slideTitle").textContent = "Generowanie 10 slajdów prezentacji...";
+            document.getElementById("slideText").textContent = `Analizuję ${sessionMatches.length} mecz(ów) z właśnie zakończonej sesji...`;
+
+            try {
+                const prompt = `Jesteś komentatorem e-sportowym "Ligi Dwójek 2v2" w League of Legends.
+Stwórz prezentację złożoną z DOKŁADNIE 10 slajdów podsumowujących TYLKO I WYŁĄCZNIE właśnie zakończoną sesję (poniższe mecze z dzisiejszej sesji). Nie opisuj starych sesji spoza tej listy! Uwzględnij serie zwycięstw/porażek, użytych bohaterów, zadane obrażenia i zwroty akcji.
+
+Mecze z właśnie zakończonej sesji (${sessionMatches.length}):
+${JSON.stringify(sessionMatches, null, 2)}
+
+Aktualna tabela po sesji:
+${generateMarkdownProtocol()}
+
+Zwróć wyłącznie czysty JSON w formacie tablicy 10 obiektów:
+[
+  {"title": "Slajd 1: Tytuł ciekawostki", "text": "Barwne 1-2 zdania do przeczytania przez lektora TTS po polsku."}
+]`;
+
+                const data = await callGeminiWithFallback(apiKey, {
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: { responseMimeType: "application/json" }
+                });
+
+                const rawText = data.candidates[0].content.parts[0].text;
+                const slides = extractSafeJSON(rawText);
+
+                appState.slides = Array.isArray(slides) ? slides : [];
+                // ZEROWANIE LICZNIKA DZISIEJSZEJ SESJI PO WYGENEROWANIU CIEKAWOSTEK
+                appState.currentSessionMatches = [];
+                currentSlideIndex = 0;
+                saveState();
+                autoPlayPresentation();
+            } catch (err) {
+                alert("Błąd generowania prezentacji: " + err.message);
+                renderSlide();
+            }
+        }
+
+        function updatePlayersDatalist() {
+            const dl = document.getElementById("playersList");
+            dl.innerHTML = Object.keys(appState.players).map(p => `<option value="${p}"></option>`).join("");
+        }
+
+        function checkNewPlayersNotice() {
+            const ids = ["w1_name", "w2_name", "l1_name", "l2_name"];
+            const newNames = [];
+            ids.forEach(id => {
+                const val = normalizePlayerName(document.getElementById(id).value);
+                if (val && !appState.players[val]) newNames.push(val);
+            });
+            const notice = document.getElementById("newPlayerNotice");
+            if (newNames.length > 0) {
+                notice.textContent = `Wykryto nowych graczy: ${newNames.join(", ")} (start: 1000 ELO)`;
+                notice.classList.remove("hidden");
+            } else {
+                notice.classList.add("hidden");
+            }
+        }
+
+        function parseDurationToSeconds(str) {
+            if (!str || !str.includes(":")) return 0;
+            const parts = str.trim().split(":").map(Number);
+            return parts.length === 2 ? parts[0] * 60 + parts[1] : 0;
+        }
+
+        function renderAll() {
+            updateModelBadge();
+            updatePlayersDatalist();
+            document.getElementById("sessionCountLabel").textContent = (appState.currentSessionMatches || []).length;
+
+            const tbody = document.getElementById("standingsBody");
+            const sorted = Object.values(appState.players).sort((a, b) => b.elo - a.elo);
+
+            tbody.innerHTML = sorted.map((p, idx) => {
+                const total = p.w + p.l;
+                const wr = total > 0 ? Math.round((p.w / total) * 100) : 0;
+                const formIcons = (p.form || []).slice(0, 5).map(f => f === "W" ? "🟢" : "🔴").join("");
+                const streakBadge = p.streak > 0 
+                    ? `<span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-xs font-bold">${p.streak}W 🔥</span>`
+                    : (p.streak < 0 ? `<span class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 text-xs font-bold">${Math.abs(p.streak)}L 💀</span>` : `-`);
+                return `
+                    <tr class="hover:bg-slate-800/40">
+                        <td class="py-3 px-3 font-bold text-slate-400">${idx + 1}</td>
+                        <td class="py-3 px-3 font-bold text-white">${p.name}</td>
+                        <td class="py-3 px-3 text-center font-extrabold text-amber-400">${p.elo}</td>
+                        <td class="py-3 px-3 text-center text-emerald-400">${p.w}</td>
+                        <td class="py-3 px-3 text-center text-rose-400">${p.l}</td>
+                        <td class="py-3 px-3 text-center font-semibold">${wr}%</td>
+                        <td class="py-3 px-3 text-center">${streakBadge}</td>
+                        <td class="py-3 px-3 text-center tracking-widest">${formIcons || "-"}</td>
+                    </tr>
+                `;
+            }).join("");
+
+            const r = appState.records;
+            document.getElementById("recordsGrid").innerHTML = `
+                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-lg">
+                    <div class="text-xs text-slate-400">Max ELO</div>
+                    <div class="text-base font-bold text-amber-400 mt-0.5">${r.maxElo.value} <span class="text-xs text-slate-300 font-normal">(${r.maxElo.player})</span></div>
+                </div>
+                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-lg">
+                    <div class="text-xs text-slate-400">Min ELO</div>
+                    <div class="text-base font-bold text-rose-400 mt-0.5">${r.minElo.value} <span class="text-xs text-slate-300 font-normal">(${r.minElo.player})</span></div>
+                </div>
+                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-lg">
+                    <div class="text-xs text-slate-400">Max DMG</div>
+                    <div class="text-base font-bold text-emerald-400 mt-0.5">${r.maxDmg.value.toLocaleString("pl-PL")} <span class="text-xs text-slate-300 font-normal">(${r.maxDmg.player} - ${r.maxDmg.champion})</span></div>
+                </div>
+                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-lg">
+                    <div class="text-xs text-slate-400">Najdłuższa gra</div>
+                    <div class="text-base font-bold text-sky-400 mt-0.5">${r.longestGame.duration}</div>
+                </div>
+                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-lg">
+                    <div class="text-xs text-slate-400">Najdłuższa seria W / L</div>
+                    <div class="text-base font-bold text-white mt-0.5">${r.maxWinStreak.value}W (${r.maxWinStreak.player}) / ${r.maxLossStreak.value}L (${r.maxLossStreak.player})</div>
+                </div>
+                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-lg">
+                    <div class="text-xs text-slate-400">Mecze w bieżącej sesji</div>
+                    <div class="text-base font-bold text-purple-400 mt-0.5">${(appState.currentSessionMatches || []).length}</div>
+                </div>
+            `;
+
+            document.getElementById("protocolOutput").textContent = generateMarkdownProtocol();
+            renderSlide();
+            lucide.createIcons();
+        }
+
+        function generateMarkdownProtocol() {
+            const allRows = Object.values(appState.players).sort((a, b) => b.elo - a.elo);
+            const tableLines = [
+                "--- AKTUALNY STAN TABELI ---",
+                "| Gracz | ELO | W | L | WR % | Forma (ost. mecze) |",
+                "| :--- | :---: | :---: | :---: | :---: | :---: |"
+            ];
+            allRows.forEach(p => {
+                const total = p.w + p.l;
+                const wr = total > 0 ? Math.round((p.w / total) * 100) : 0;
+                const formStr = (p.form && p.form.length > 0)
+                    ? p.form.slice(0, 5).map(f => f === "W" ? "🟢" : "🔴").join("")
+                    : "-";
+                tableLines.push(`| ${p.name} | ${p.elo} | ${p.w} | ${p.l} | ${wr}% | ${formStr} |`);
+            });
+
+            const r = appState.records;
+            const recordsBlock = [
+                "",
+                "**REKORDY LIGI:**",
+                `* **Max ELO:** ${r.maxElo.value} (${r.maxElo.player})`,
+                `* **Min ELO:** ${r.minElo.value} (${r.minElo.player})`,
+                `* **Max DMG:** ${r.maxDmg.value.toLocaleString("pl-PL")} (${r.maxDmg.player} - ${r.maxDmg.champion})`,
+                `* **Najdłuższa gra:** ${r.longestGame.duration} (${r.longestGame.desc})`,
+                `* **Najdłuższa seria zwycięstw:** ${r.maxWinStreak.value} (${r.maxWinStreak.player})`,
+                `* **Najdłuższa seria przegranych:** ${r.maxLossStreak.value} (${r.maxLossStreak.player})`,
+                `* **Top 3 najlepsze championy:**`,
+                ...r.topChampions.map(c => `  ${c}`)
+            ];
+
+            if (!appState.lastMatchReport) return [...tableLines, ...recordsBlock].join("\n");
+
+            const m = appState.lastMatchReport;
+            const matchBlock = [
+                "WYNIK MECZU:",
+                `Wygrani: ${m.w1.name}, ${m.w2.name}`,
+                `Przegrani: ${m.l1.name}, ${m.l2.name}`,
+                "",
+                "ZMIANY ELO:",
+                `${m.w1.name}: ${m.w1.oldElo} -> ${m.w1.newElo} (+${m.delta})`,
+                `${m.w2.name}: ${m.w2.oldElo} -> ${m.w2.newElo} (+${m.delta})`,
+                `${m.l1.name}: ${m.l1.oldElo} -> ${m.l1.newElo} (-${m.delta})`,
+                `${m.l2.name}: ${m.l2.oldElo} -> ${m.l2.newElo} (-${m.delta})`,
+                "",
+                "CIEKAWOSTKA STATYSTYCZNA:",
+                m.trivia,
+                ""
+            ];
+            return [...matchBlock, ...tableLines, ...recordsBlock].join("\n");
+        }
+
+        function swapTeams() {
+            const fields = ["name", "champ", "dmg"];
+            fields.forEach(f => {
+                const t1 = document.getElementById(`w1_${f}`).value;
+                const t2 = document.getElementById(`w2_${f}`).value;
+                document.getElementById(`w1_${f}`).value = document.getElementById(`l1_${f}`).value;
+                document.getElementById(`w2_${f}`).value = document.getElementById(`l2_${f}`).value;
+                document.getElementById(`l1_${f}`).value = t1;
+                document.getElementById(`l2_${f}`).value = t2;
+            });
+            checkNewPlayersNotice();
+        }
+
+        function openManualMatch() {
+            document.getElementById("w1_name").value = "Cancer";
+            document.getElementById("w2_name").value = "Jargolek";
+            document.getElementById("l1_name").value = "Firstu";
+            document.getElementById("l2_name").value = "SPICYBob";
+            document.getElementById("verifyPanel").classList.remove("hidden");
+            document.getElementById("match_duration").value = "20:00";
+            document.getElementById("match_trivia").value = "Zacięte starcie na Howling Abyss zakończone zwycięstwem faworytów.";
+            checkNewPlayersNotice();
+        }
+
+        function closeVerifyPanel() {
+            document.getElementById("verifyPanel").classList.add("hidden");
+        }
+
+        function ensurePlayerExists(name) {
+            if (!appState.players[name]) {
+                appState.players[name] = { name, elo: 1000, w: 0, l: 0, form: [], streak: 0 };
+            }
+            return appState.players[name];
+        }
+
+        function confirmMatch() {
+            const w1Name = normalizePlayerName(document.getElementById("w1_name").value);
+            const w2Name = normalizePlayerName(document.getElementById("w2_name").value);
+            const l1Name = normalizePlayerName(document.getElementById("l1_name").value);
+            const l2Name = normalizePlayerName(document.getElementById("l2_name").value);
+
+            const chosen = new Set([w1Name.toLowerCase(), w2Name.toLowerCase(), l1Name.toLowerCase(), l2Name.toLowerCase()]);
+            if (chosen.size !== 4) {
+                alert("W meczu musi brać udział 4 różnych graczy!");
+                return;
+            }
+
+            const snapshot = JSON.parse(JSON.stringify({
+                players: appState.players,
+                records: appState.records,
+                lastMatchReport: appState.lastMatchReport,
+                currentSessionMatches: appState.currentSessionMatches
+            }));
+
+            const pW1 = ensurePlayerExists(w1Name);
+            const pW2 = ensurePlayerExists(w2Name);
+            const pL1 = ensurePlayerExists(l1Name);
+            const pL2 = ensurePlayerExists(l2Name);
+
+            const winTeamElo = (pW1.elo + pW2.elo) / 2;
+            const loseTeamElo = (pL1.elo + pL2.elo) / 2;
+            const expectedWin = 1 / (1 + Math.pow(10, (loseTeamElo - winTeamElo) / 400));
+            const delta = Math.round(32 * (1 - expectedWin));
+
+            const report = {
+                w1: { name: pW1.name, oldElo: pW1.elo, newElo: pW1.elo + delta, champ: document.getElementById("w1_champ").value || "Bohater", dmg: Number(document.getElementById("w1_dmg").value) || 0 },
+                w2: { name: pW2.name, oldElo: pW2.elo, newElo: pW2.elo + delta, champ: document.getElementById("w2_champ").value || "Bohater", dmg: Number(document.getElementById("w2_dmg").value) || 0 },
+                l1: { name: pL1.name, oldElo: pL1.elo, newElo: pL1.elo - delta, champ: document.getElementById("l1_champ").value || "Bohater", dmg: Number(document.getElementById("l1_dmg").value) || 0 },
+                l2: { name: pL2.name, oldElo: pL2.elo, newElo: pL2.elo - delta, champ: document.getElementById("l2_champ").value || "Bohater", dmg: Number(document.getElementById("l2_dmg").value) || 0 },
+                delta,
+                duration: document.getElementById("match_duration").value || "18:00",
+                trivia: document.getElementById("match_trivia").value || "Kolejny mecz zapisany w historii ligi!"
+            };
+
+            [pW1, pW2].forEach(p => {
+                p.elo += delta; p.w += 1;
+                p.form.unshift("W"); p.form = p.form.slice(0, 5);
+                p.streak = p.streak > 0 ? p.streak + 1 : 1;
+                if (p.elo > appState.records.maxElo.value) appState.records.maxElo = { value: p.elo, player: p.name };
+                if (p.streak > appState.records.maxWinStreak.value) appState.records.maxWinStreak = { value: p.streak, player: p.name };
+            });
+
+            [pL1, pL2].forEach(p => {
+                p.elo -= delta; p.l += 1;
+                p.form.unshift("L"); p.form = p.form.slice(0, 5);
+                p.streak = p.streak < 0 ? p.streak - 1 : -1;
+                if (p.elo < appState.records.minElo.value) appState.records.minElo = { value: p.elo, player: p.name };
+                if (Math.abs(p.streak) > appState.records.maxLossStreak.value) appState.records.maxLossStreak = { value: Math.abs(p.streak), player: p.name };
+            });
+
+            [report.w1, report.w2, report.l1, report.l2].forEach(entry => {
+                if (entry.dmg > appState.records.maxDmg.value) {
+                    appState.records.maxDmg = { value: entry.dmg, player: entry.name, champion: entry.champ };
+                }
+            });
+
+            if (parseDurationToSeconds(report.duration) > parseDurationToSeconds(appState.records.longestGame.duration)) {
+                appState.records.longestGame = { duration: report.duration, desc: `${pW1.name} & ${pW2.name} vs ${pL1.name} & ${pL2.name}` };
+            }
+
+            appState.lastMatchReport = report;
+            if (!appState.currentSessionMatches) appState.currentSessionMatches = [];
+            appState.currentSessionMatches.push(report);
+            appState.history.push({ snapshot, report, timestamp: new Date().toISOString() });
+
+            closeVerifyPanel();
+            saveState();
+        }
+
+        function undoLastMatch() {
+            if (appState.history.length === 0) {
+                alert("Brak meczów do cofnięcia.");
+                return;
+            }
+            const last = appState.history.pop();
+            appState.players = last.snapshot.players;
+            appState.records = last.snapshot.records;
+            appState.lastMatchReport = last.snapshot.lastMatchReport;
+            appState.currentSessionMatches = last.snapshot.currentSessionMatches || [];
+            saveState();
+        }
+
+        window.addEventListener("paste", e => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (let item of items) {
+                if (item.type.startsWith("image/")) {
+                    processScreenshot(item.getAsFile());
+                    break;
+                }
+            }
+        });
+
+        function handleFileSelect(e) {
+            const file = e.target.files?.[0];
+            if (file) processScreenshot(file);
+        }
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result.split(",")[1]);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        async function processScreenshot(file) {
+            const apiKey = localStorage.getItem("liga_dwojek_api_key");
+            if (!apiKey) {
+                openSettings();
+                alert("Wklej najpierw swój klucz Gemini API!");
+                return;
+            }
+            document.getElementById("dropzoneContent").classList.add("hidden");
+            document.getElementById("loadingOverlay").classList.remove("hidden");
+
+            try {
+                const base64Data = await fileToBase64(file);
+                const knownPlayers = Object.keys(appState.players).join(", ");
+                const prompt = `Przeanalizuj zrzut ekranu z podsumowania meczu League of Legends (2v2).
+Zmapuj znane aliasy na oficjalne nicki:
+- "Canc3r07" lub podobne -> "Cancer"
+- "SpicyBob" -> "SPICYBob"
+- "przypro" -> "Przypro"
+- "Jargolek" -> "Jargolek"
+- "Firstu" -> "Firstu"
+Dotychczasowi gracze: ${knownPlayers}.
+Jeśli jest nowy gracz, odczytaj jego dokładny nick.
+Spójrz na napis w lewym górnym rogu:
+- "ZWYCIĘSTWO" -> wygrała DRUŻYNA 1 (górna)
+- "PRZEGRANA" -> wygrała DRUŻYNA 2 (dolna)
+Zwróć czysty JSON:
+{
+  "winners": [{"name": "Jargolek", "champion": "Maokai", "dmg": 23332}, {"name": "Firstu", "champion": "Samira", "dmg": 50900}],
+  "losers": [{"name": "SPICYBob", "champion": "Varus", "dmg": 30299}, {"name": "Cancer", "champion": "Xin Zhao", "dmg": 54734}],
+  "duration": "17:33",
+  "trivia": "Jedno błyskotliwe, fantazyjne zdanie po polsku o tym meczu."
+}`;
+
+                const data = await callGeminiWithFallback(apiKey, {
+                    contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: file.type, data: base64Data } }] }],
+                    generationConfig: { responseMimeType: "application/json" }
+                });
+
+                const rawText = data.candidates[0].content.parts[0].text;
+                const parsed = extractSafeJSON(rawText);
+
+                document.getElementById("w1_name").value = normalizePlayerName(parsed.winners[0]?.name || "Cancer");
+                document.getElementById("w1_champ").value = parsed.winners[0]?.champion || "";
+                document.getElementById("w1_dmg").value = parsed.winners[0]?.dmg || 0;
+
+                document.getElementById("w2_name").value = normalizePlayerName(parsed.winners[1]?.name || "Jargolek");
+                document.getElementById("w2_champ").value = parsed.winners[1]?.champion || "";
+                document.getElementById("w2_dmg").value = parsed.winners[1]?.dmg || 0;
+
+                document.getElementById("l1_name").value = normalizePlayerName(parsed.losers[0]?.name || "Firstu");
+                document.getElementById("l1_champ").value = parsed.losers[0]?.champion || "";
+                document.getElementById("l1_dmg").value = parsed.losers[0]?.dmg || 0;
+
+                document.getElementById("l2_name").value = normalizePlayerName(parsed.losers[1]?.name || "SPICYBob");
+                document.getElementById("l2_champ").value = parsed.losers[1]?.champion || "";
+                document.getElementById("l2_dmg").value = parsed.losers[1]?.dmg || 0;
+
+                document.getElementById("match_duration").value = parsed.duration || "20:00";
+                document.getElementById("match_trivia").value = parsed.trivia || "";
+
+                checkNewPlayersNotice();
+                document.getElementById("verifyPanel").classList.remove("hidden");
+            } catch (err) {
+                alert("Błąd analizy obrazu: " + err.message);
+            } finally {
+                document.getElementById("dropzoneContent").classList.remove("hidden");
+                document.getElementById("loadingOverlay").classList.add("hidden");
+            }
+        }
+
+        function copyProtocol() {
+            navigator.clipboard.writeText(document.getElementById("protocolOutput").textContent);
+            alert("Skopiowano protokół na Discord!");
+        }
+
+        function openSettings() {
+            document.getElementById("apiKeyInput").value = localStorage.getItem("liga_dwojek_api_key") || "";
+            document.getElementById("modelInput").value = localStorage.getItem("liga_dwojek_model") || "gemini-3.0-flash";
+            document.getElementById("settingsModal").classList.remove("hidden");
+            document.getElementById("settingsModal").classList.add("flex");
+        }
+
+        function closeSettings() {
+            document.getElementById("settingsModal").classList.add("hidden");
+            document.getElementById("settingsModal").classList.remove("flex");
+        }
+
+        function saveSettings() {
+            localStorage.setItem("liga_dwojek_api_key", document.getElementById("apiKeyInput").value.trim());
+            localStorage.setItem("liga_dwojek_model", document.getElementById("modelInput").value.trim().replace(/^models\//, "") || "gemini-3.0-flash");
+            updateModelBadge();
+            closeSettings();
+        }
+
+        async function detectAvailableModels() {
+            const key = document.getElementById("apiKeyInput").value.trim() || localStorage.getItem("liga_dwojek_api_key");
+            const status = document.getElementById("modelDetectStatus");
+            if (!key) return alert("Wklej najpierw klucz API!");
+            status.classList.remove("hidden");
+            status.textContent = "Sprawdzanie...";
+            const models = await resolveWorkingModel(key);
+            document.getElementById("modelInput").value = models[0];
+            status.textContent = `Wykryto: ${models[0]}`;
+        }
+
+        function resetToDefaultState() {
+            if (confirm("Zresetować tabelę do stanu z czatu?")) {
+                appState = JSON.parse(JSON.stringify(INITIAL_STATE));
+                saveState();
+                closeSettings();
+            }
+        }
+
+        function exportData() {
+            const blob = new Blob([JSON.stringify(appState, null, 2)], { type: "application/json" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = `liga-dwojek-backup-${new Date().toISOString().slice(0,10)}.json`;
+            a.click();
+        }
+
+        renderAll();
+    </script>
+</body>
+</html>
